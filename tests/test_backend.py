@@ -66,6 +66,8 @@ class BackendTest(unittest.TestCase):
         self.b.autoTimer.stop()
         self.b.reconnectTimer.stop()
         self.b.networkTimer.stop()
+        # 登录成功后还有一个 600ms 后的刷新（QTimer.singleShot）停不掉；改指向没人监听的端口，免得它查到下一个测试的假门户
+        self.b.portal_override = "http://127.0.0.1:1"
         self.dir.cleanup()
         # 本校门户必须走 eportal，内核接口用了就会“显示在线却没网”
         self.assertFalse({"/drcom/login", "/drcom/logout"} & self.mock.seen_paths)

@@ -97,8 +97,8 @@ class RequestGate:
     线程安全；等待发生在调用者的线程里（后台线程），等待前回调 on_wait(秒数)，界面可以据此显示倒计时。
     """
 
-    def __init__(self, interval: float = AUTH_INTERVAL):
-        self.interval = interval
+    def __init__(self, interval: float | None = None):
+        self.interval = AUTH_INTERVAL if interval is None else interval   # 运行时再读，set_auth_interval 之后新建的也生效
         self.backoff = 0.0
         self._lock = threading.Lock()
         self._next = 0.0
