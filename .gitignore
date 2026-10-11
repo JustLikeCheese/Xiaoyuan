@@ -1,0 +1,14 @@
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+
+# PyInstaller 打包产物
+build/
+dist/
+
+# 打包好的发布压缩包
+*.zip
+
+# wlan_mac_changer.py 运行时生成的备份
+wlan_mac_backup.json
