@@ -28,7 +28,8 @@
 
 ## 使用
 
-直接运行 `dist\校园网登录.exe`。账号、设置保存在 `%APPDATA%\XiaoyuanLogin\`，请求日志在其中的 `logs\`（密码已打码）。
+从 [Releases](https://github.com/JustLikeCheese/Xiaoyuan/releases) 下载最新的 `Xiaoyuan-vX.Y.Z-win-x64.exe` 直接运行
+（自己打包的在 `dist\校园网登录.exe`）。账号、设置保存在 `%APPDATA%\XiaoyuanLogin\`，请求日志在其中的 `logs\`（密码已打码）。
 
 ## 开发
 
@@ -71,6 +72,15 @@ python -m venv .venv
 
 ```powershell
 .\build.ps1      # 输出 dist\校园网登录.exe（单文件，约 46 MB）
+```
+
+GitHub Actions（`.github/workflows/build.yml`）在每次推送到 main 和提 PR 时跑测试并打包，exe 可在 Actions 页面下载。
+发版：把 `backend.py` 里的 `APP_VERSION` 改成新版本号并提交，再推送同名标签，CI 会自动创建 Release 并上传 exe
+（标签和 `APP_VERSION` 不一致时直接失败）：
+
+```powershell
+git tag v2.3.4
+git push origin main v2.3.4
 ```
 
 ## 许可证

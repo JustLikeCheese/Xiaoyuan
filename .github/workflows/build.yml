@@ -1,0 +1,88 @@
+# 推送到 main、提 PR 时：跑测试 + 打包，exe 作为构建产物（Actions 页面可下载）
+# 推送 v* 标签时：再自动创建 GitHub Release 并上传 exe
+#   发版：改 backend.py 里的 APP_VERSION → 提交 → git tag v2.3.4 → git push origin v2.3.4
+name: 构建与发布
+
+on:
+  push:
+    branches: [main]
+    tags: ['v*']
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: windows-latest
+    defaults:
+      run:
+        shell: pwsh
+    outputs:
+      version: ${{ steps.version.outputs.version }}
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-python@v7
+        with:
+          python-version: '3.14'
+          cache: pip
+          cache-dependency-path: requirements.txt
+
+      - name: 读取版本号
+        id: version
+        run: |
+          $m = Select-String -Path backend.py -Pattern '^APP_VERSION = "(.+)"'
+          if (-not $m) { throw 'backend.py 里找不到 APP_VERSION' }
+          $ver = $m.Matches[0].Groups[1].Value
+          if ($env:GITHUB_REF_TYPE -eq 'tag' -and $env:GITHUB_REF_NAME -ne "v$ver") {
+            throw "标签 $env:GITHUB_REF_NAME 和 backend.py 里的 APP_VERSION（$ver）不一致"
+          }
+          "version=$ver" >> $env:GITHUB_OUTPUT
+
+      # build.ps1 看到 .venv 已存在就不再装依赖
+      - name: 安装依赖
+        run: |
+          python -m venv .venv
+          .\.venv\Scripts\python.exe -m pip install -r requirements.txt pyinstaller
+
+      - name: 测试
+        run: .\.venv\Scripts\python.exe -m unittest tests.test_portal tests.test_backend tests.test_logfiles
+
+      # GitHub 会把 Release 附件名里的中文替换掉，所以改成英文文件名
+      - name: 打包
+        run: |
+          .\build.ps1
+          $exe = Get-ChildItem dist\*.exe | Select-Object -First 1
+          Move-Item $exe.FullName "dist\Xiaoyuan-v${{ steps.version.outputs.version }}-win-x64.exe"
+
+      - uses: actions/upload-artifact@v7
+        with:
+          name: Xiaoyuan-v${{ steps.version.outputs.version }}
+          path: dist/*.exe
+          if-no-files-found: error
+
+  release:
+    if: startsWith(github.ref, 'refs/tags/v')
+    needs: build
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v8
+        with:
+          name: Xiaoyuan-v${{ needs.build.outputs.version }}
+          path: dist
+
+      - name: 创建 Release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+        run: |
+          exe=$(ls dist/*.exe)
+          hash=$(sha256sum "$exe" | cut -d' ' -f1)
+          gh release create "$GITHUB_REF_NAME" "$exe" \
+            --title "校园网登录 $GITHUB_REF_NAME" \
+            --notes "$(printf 'Windows 10/11 64 位，下载后直接运行。\n\nSHA256: `%s`' "$hash")" \
+            --generate-notes
