@@ -80,14 +80,16 @@ jobs:
       - uses: gradle/actions/setup-gradle@v6
 
       # 发布版用作者本机的调试签名（和作者手机上装的一致，才能覆盖升级），签名文件以 base64 放在仓库 Secret DEBUG_KEYSTORE。
-      # 没有这个 Secret（比如别人提的 PR）就用运行器临时生成的，只是装不到已安装的版本上；发版时必须有
+      # 用 ANDROID_USER_HOME 指定签名文件所在目录（运行器上默认找的不是 ~/.android）。
+      # 没有这个 Secret（比如别人提的 PR）就用临时生成的，只是装不到已安装的版本上；发版时必须有
       - name: 准备签名
         env:
           DEBUG_KEYSTORE: ${{ secrets.DEBUG_KEYSTORE }}
         run: |
           if [ -n "$DEBUG_KEYSTORE" ]; then
-            mkdir -p ~/.android
-            echo "$DEBUG_KEYSTORE" | base64 -d > ~/.android/debug.keystore
+            mkdir -p "$RUNNER_TEMP/android"
+            echo "$DEBUG_KEYSTORE" | base64 -d > "$RUNNER_TEMP/android/debug.keystore"
+            echo "ANDROID_USER_HOME=$RUNNER_TEMP/android" >> "$GITHUB_ENV"
           elif [ "$GITHUB_REF_TYPE" = tag ]; then
             echo "::error::发版需要仓库 Secret DEBUG_KEYSTORE（签名文件）"
             exit 1
@@ -99,6 +101,19 @@ jobs:
         env:
           PYTHON: python3
         run: ./gradlew testDebugUnitTest assembleRelease --console=plain
+
+      # APK 的签名证书要和签名文件里的一样，不一样（没用上）就失败，免得发出装不上的包
+      - name: 检查签名
+        if: env.ANDROID_USER_HOME != ''
+        run: |
+          want=$(keytool -list -v -keystore "$ANDROID_USER_HOME/debug.keystore" -storepass android | sed -n 's/^[[:space:]]*SHA256: //p' | head -1 | tr -d ':' | tr 'A-F' 'a-f')
+          got=$("$ANDROID_HOME/build-tools/36.0.0/apksigner" verify --print-certs android/app/build/outputs/apk/release/app-release.apk | sed -n 's/.*SHA-256 digest: //p' | head -1)
+          echo "签名文件 $want"
+          echo "APK      $got"
+          if [ -z "$want" ] || [ "$want" != "$got" ]; then
+            echo "::error::APK 的签名和签名文件不一致"
+            exit 1
+          fi
 
       - name: 改名
         id: apk
