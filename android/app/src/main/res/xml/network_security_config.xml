@@ -1,0 +1,5 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- 门户（默认 10.253.0.1）只有 http；门户地址可以在设置里改，所以整体允许明文 -->
+<network-security-config>
+    <base-config cleartextTrafficPermitted="true" />
+</network-security-config>

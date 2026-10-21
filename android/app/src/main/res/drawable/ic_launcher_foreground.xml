@@ -1,0 +1,26 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- 和桌面端 app.ico 一样：三道圆头弧线加一个圆点。画在 108dp 画布的安全区（直径 66dp）内 -->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="108dp"
+    android:height="108dp"
+    android:viewportWidth="108"
+    android:viewportHeight="108">
+    <path
+        android:pathData="M30.22,46.59 A32,32 0 0 1 77.78,46.59"
+        android:strokeWidth="6.5"
+        android:strokeLineCap="round"
+        android:strokeColor="#FFFFFF" />
+    <path
+        android:pathData="M37.65,53.28 A22,22 0 0 1 70.35,53.28"
+        android:strokeWidth="6.5"
+        android:strokeLineCap="round"
+        android:strokeColor="#FFFFFF" />
+    <path
+        android:pathData="M45.08,59.97 A12,12 0 0 1 62.92,59.97"
+        android:strokeWidth="6.5"
+        android:strokeLineCap="round"
+        android:strokeColor="#FFFFFF" />
+    <path
+        android:pathData="M54,70 m-5.5,0 a5.5,5.5 0 1 0 11,0 a5.5,5.5 0 1 0 -11,0"
+        android:fillColor="#FFFFFF" />
+</vector>

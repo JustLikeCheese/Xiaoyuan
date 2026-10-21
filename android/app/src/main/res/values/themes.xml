@@ -1,0 +1,5 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- 界面全部由 Compose 绘制，这里只决定启动时的窗口底色 -->
+    <style name="Theme.Xiaoyuan" parent="android:Theme.Material.Light.NoActionBar" />
+</resources>
