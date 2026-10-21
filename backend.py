@@ -34,7 +34,7 @@ except ImportError:   # pragma: no cover
     QNetworkInformation = None
 
 APP_NAME = "校园网登录"
-APP_VERSION = "2.3.3"
+APP_VERSION = "2.3.4"
 APP_AUTHOR = "JustLikeCheese"
 APP_URL = "https://github.com/JustLikeCheese/Xiaoyuan"
 APP_LICENSE = "GNU GPL v3"
