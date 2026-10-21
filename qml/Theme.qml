@@ -67,6 +67,8 @@ QtObject {
     readonly property string iHistory: ""
     readonly property string iDocument: ""
     readonly property string iTimer: ""
+    readonly property string iImport: ""
+    readonly property string iQr: ""
 
     function masked(text, secret, reveal) {
         if (!text)

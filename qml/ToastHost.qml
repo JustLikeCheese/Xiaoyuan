@@ -25,14 +25,14 @@ Column {
             required property string content
             required property int duration
             readonly property color accentColor: kind === "success" ? Theme.success
-                                               : kind === "error" ? Theme.danger
+                                               : kind === "error" || kind === "offline" ? Theme.danger
                                                : kind === "warning" ? Theme.warning : Theme.accent
 
             objectName: "toast"
             width: host.width
             height: row.implicitHeight + 24
             radius: 8
-            color: kind === "success" ? Theme.successBg : kind === "error" ? Theme.dangerBg
+            color: kind === "success" ? Theme.successBg : kind === "error" || kind === "offline" ? Theme.dangerBg
                  : kind === "warning" ? Theme.warningBg : Theme.infoBg
             border.color: Theme.cardBorder
             opacity: 0
@@ -62,6 +62,7 @@ Column {
                 spacing: 12
                 FIcon {
                     glyph: toast.kind === "success" ? Theme.iSuccess : toast.kind === "error" ? Theme.iError
+                         : toast.kind === "offline" ? Theme.iPower
                          : toast.kind === "warning" ? Theme.iWarning : Theme.iInfo
                     color: toast.accentColor
                     size: 16

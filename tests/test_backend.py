@@ -132,7 +132,7 @@ class BackendTest(unittest.TestCase):
         self.assertTrue(wait_until(lambda: self.online_as("2002010@telecom")))
         self.b.logout()
         self.assertTrue(wait_until(lambda: self.state() == "offline"))
-        self.assertIn(("success", "已注销", "", 3000), self.toasts)
+        self.assertIn(("offline", "已注销", "", 3000), self.toasts)
 
     def test_details_and_raw_fields(self):
         self.b.login("2002010", GOOD_PASSWORD, "@telecom", True)

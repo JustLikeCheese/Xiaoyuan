@@ -220,6 +220,24 @@ class PortalTest(unittest.TestCase):
         self.assertEqual(paths, ["/eportal/portal/mac/unbind", "/eportal/portal/logout"])
         self.assertFalse(self.mock.online)
 
+    def test_unbound_mac_does_not_delay_logout(self):
+        # 本校门户：要求注销时解绑，但本机没绑 MAC，解绑回复“mac不存在”
+        self.mock.config.update(un_bind_mac="1")
+        self.mock.mac_bound = False
+        self.portal.login("2002010", GOOD_PASSWORD)
+        portal_module.set_auth_interval(2)
+        start = time.monotonic()
+        self.assertTrue(self.portal.logout())
+        self.assertLess(time.monotonic() - start, 1.5)   # 解绑被拒不占请求间隔，紧接着注销
+        self.assertFalse(self.mock.online)
+        # 记住了本机没绑 MAC：之后注销直接 logout，不再先解绑
+        portal_module.set_auth_interval(0)
+        self.portal.login("2002010", GOOD_PASSWORD)
+        self.mock.requests.clear()
+        self.assertTrue(self.portal.logout())
+        self.assertNotIn("/eportal/portal/mac/unbind", self.mock.paths())
+        self.assertIn("/eportal/portal/logout", self.mock.paths())
+
     def test_unbind_gets_account_from_fresh_status_when_not_cached(self):
         self.mock.config.update(un_bind_mac="1")
         self.portal.login("2002010", GOOD_PASSWORD)

@@ -14,6 +14,11 @@ busy_replies 设为 n 时，接下来 n 次登录/注销回复 ret_code=3（系�
 config 是 page/loadConfig 返回的配置；登录、注销、解绑会按它校验参数（参数和配置不符时不生效），
 和真实门户一样：页面上的 login_method、account_prefix、ac_logout、register_mode 都要取自这里。
 notice：门户公告（HTML）。
+
+单独运行时另有 /__mock__/ 控制接口，给安卓端的 Kotlin 测试在另一个进程里改状态、读请求记录（不计入 requests）：
+    /__mock__/reset、/__mock__/clear（只清请求记录）、/__mock__/state（读状态）
+    /__mock__/set?online=1&uid=x&release_delay=0&busy_replies=2&config_available=0&notice=...&config.ac_logout=1
+都返回 JSON：online、uid、requests（[{path, query: [[键, 值]...], time}]）、seen_paths。
 """
 
 from __future__ import annotations
@@ -65,6 +70,7 @@ class MockPortal:
         self.online, self.uid, self.released_at, self.busy_replies = False, "", 0.0, 0
         self.config, self.config_available = dict(DEFAULT_CONFIG), True
         self.notice = ""
+        self.mac_bound = True   # False 时解绑回复“mac不存在”（本校门户：要求注销时解绑，但没绑 MAC）
         self.requests.clear()
         self.times.clear()
 
@@ -89,6 +95,9 @@ class MockPortal:
             def do_GET(self):
                 url = urlsplit(self.path)
                 query = parse_qsl(url.query, keep_blank_values=True)
+                if url.path.startswith("/__mock__/"):
+                    self.control(url.path, query)
+                    return
                 mock.requests.append((url.path, query))
                 mock.times.append(time.monotonic())
                 mock.seen_paths.add(url.path)
@@ -140,6 +149,8 @@ class MockPortal:
                     ok_ip = q.get("wlan_user_ip") == str(int(ipaddress.IPv4Address(CLIENT_IP)))
                     if mock.config.get("un_bind_mac") != "1":
                         self.reply(cb, {"result": 0, "msg": "未启用注销解绑MAC"}, "utf-8")
+                    elif not mock.mac_bound:
+                        self.reply(cb, {"result": 0, "msg": "mac不存在"}, "utf-8")
                     elif not mock.online or q.get("user_account") != mock.uid or not ok_ip \
                             or q.get("wlan_user_mac") != q.get("wlan_user_mac", "").upper():
                         self.reply(cb, {"result": 0, "msg": "解绑失败"}, "utf-8")
@@ -168,6 +179,39 @@ class MockPortal:
                 else:
                     self.send_response(404)
                     self.end_headers()
+
+            def control(self, path: str, query: list[tuple[str, str]]) -> None:
+                if path == "/__mock__/reset":
+                    mock.reset()
+                elif path == "/__mock__/clear":
+                    mock.requests.clear()
+                    mock.times.clear()
+                elif path == "/__mock__/set":
+                    for k, v in query:
+                        if k.startswith("config."):
+                            mock.config[k[len("config."):]] = v
+                        elif k in ("online", "config_available"):
+                            setattr(mock, k, v == "1")
+                        elif k == "release_delay":
+                            mock.release_delay = float(v)
+                        elif k == "busy_replies":
+                            mock.busy_replies = int(v)
+                        elif k in ("uid", "notice"):
+                            setattr(mock, k, v)
+                elif path != "/__mock__/state":
+                    self.send_response(404)
+                    self.end_headers()
+                    return
+                body = json.dumps({
+                    "online": mock.online, "uid": mock.uid,
+                    "requests": [{"path": p, "query": q, "time": t} for (p, q), t in zip(mock.requests, mock.times)],
+                    "seen_paths": sorted(mock.seen_paths),
+                }, ensure_ascii=False).encode("utf-8")
+                self.send_response(200)
+                self.send_header("Content-Type", "application/json; charset=utf-8")
+                self.send_header("Content-Length", str(len(body)))
+                self.end_headers()
+                self.wfile.write(body)
 
             def login(self, cb: str, q: dict) -> None:
                 account = q.get("user_account", "")
@@ -199,7 +243,7 @@ class MockPortal:
 if __name__ == "__main__":
     port = int(sys.argv[1]) if len(sys.argv) > 1 else 18080
     mock = MockPortal(port)
-    print(f"假门户已启动：{mock.base}（Ctrl+C 退出）")
+    print(f"假门户已启动：{mock.base}（Ctrl+C 退出）", flush=True)   # 端口传 0 时测试从这行读实际端口
     try:
         mock.server.serve_forever()
     except KeyboardInterrupt:

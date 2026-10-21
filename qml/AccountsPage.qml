@@ -1,13 +1,39 @@
 import QtQuick
 import QtQuick.Controls
 import QtQuick.Layouts
+import QtQuick.Dialogs
 
 // 账号管理：表格里的账号、密码跟随右上角眼睛打码
 SmoothScrollView {
     id: page
     objectName: "accountsPage"
+    // 选中的账号：单击只选一个，Ctrl+单击加选/取消，Shift+单击选一段；selected 是最后点的那个（Shift 的起点）
     property string selected: ""
-    readonly property var selectedAcc: backend.accounts.find(a => a.account === selected) ?? null
+    property var selectedSet: []
+    // 编辑、切换只对单个账号
+    readonly property var selectedAcc: selectedSet.length === 1
+                                       ? (backend.accounts.find(a => a.account === selectedSet[0]) ?? null) : null
+
+    function selectOnly(account) {
+        selected = account
+        selectedSet = account ? [account] : []
+    }
+    function selectRow(account, modifiers) {
+        const list = backend.accounts.map(a => a.account)
+        if ((modifiers & Qt.ShiftModifier) && selected !== "" && list.indexOf(selected) >= 0) {
+            const a = list.indexOf(selected)
+            const b = list.indexOf(account)
+            const range = list.slice(Math.min(a, b), Math.max(a, b) + 1)
+            selectedSet = (modifiers & Qt.ControlModifier)
+                          ? selectedSet.concat(range.filter(x => selectedSet.indexOf(x) < 0)) : range
+        } else if (modifiers & Qt.ControlModifier) {
+            selectedSet = selectedSet.indexOf(account) >= 0 ? selectedSet.filter(x => x !== account)
+                                                           : selectedSet.concat([account])
+            selected = account
+        } else {
+            selectOnly(account)
+        }
+    }
     readonly property var columns: [0.16, 0.2, 0.14, 0.14, 0.16, 0.2]
     // 当前在线的账号（门户返回的 uid 带运营商后缀，和已保存账号的“账号+后缀”比对）
     readonly property string onlineFull: backend.status.online ? backend.status.account.toLowerCase() : ""
@@ -40,7 +66,7 @@ SmoothScrollView {
             color: Theme.text
         }
         Label {
-            text: "可以保存多个账号，密码用 Windows 加密保存。点窗口右上角的眼睛显示账号和密码"
+            text: "可以保存多个账号，密码用 Windows 加密保存。按住 Ctrl 或 Shift 点击可以多选；点窗口右上角的眼睛显示账号和密码"
             font.pixelSize: 12
             color: Theme.textTertiary
             wrapMode: Text.Wrap
@@ -88,7 +114,7 @@ SmoothScrollView {
                     visible: page.onlineAcc !== null
                     glyph: Theme.iAccept
                     text: "在表格中选中"
-                    onClicked: page.selected = page.onlineAcc.account
+                    onClicked: page.selectOnly(page.onlineAcc.account)
                 }
             }
         }
@@ -98,14 +124,38 @@ SmoothScrollView {
             Layout.fillWidth: true
             IconButton { objectName: "addButton"; highlighted: true; glyph: Theme.iAdd; text: "新增账号"; onClicked: dialog.openFor(null) }
             IconButton { objectName: "editButton"; glyph: Theme.iEdit; text: "编辑"; enabled: page.selectedAcc !== null; onClicked: dialog.openFor(page.selectedAcc) }
-            IconButton { objectName: "deleteButton"; glyph: Theme.iDelete; text: "删除"; enabled: page.selectedAcc !== null; onClicked: confirm.open() }
+            IconButton { objectName: "deleteButton"; glyph: Theme.iDelete; text: "删除"; enabled: page.selectedSet.length > 0; onClicked: confirm.open() }
             Item { Layout.fillWidth: true }
+            IconButton {
+                objectName: "exportButton"
+                flat: true
+                glyph: Theme.iQr
+                text: "导出到手机"
+                enabled: backend.accounts.length > 0
+                onClicked: exportDialog.openDialog(page.selectedSet)
+            }
+            IconButton {
+                objectName: "importButton"
+                flat: true
+                glyph: Theme.iImport
+                text: "导入"
+                ToolTip.visible: hovered
+                ToolTip.delay: 600
+                ToolTip.text: "复制了手机分享的迁移数据时直接导入，否则选择迁移文件"
+                onClicked: {
+                    const copied = backend.clipboardTransfer()
+                    if (copied)
+                        importDialog.openWith(copied)
+                    else
+                        importFile.open()
+                }
+            }
             IconButton {
                 objectName: "useButton"
                 glyph: Theme.iSwitchUser
                 text: "切换到此账号"
                 enabled: page.selectedAcc !== null && !backend.busy
-                onClicked: backend.switchTo(page.selected)
+                onClicked: backend.switchTo(page.selectedAcc.account)
             }
         }
 
@@ -143,7 +193,7 @@ SmoothScrollView {
                     delegate: Rectangle {
                         id: rowItem
                         required property var modelData
-                        readonly property bool isSelected: page.selected === modelData.account
+                        readonly property bool isSelected: page.selectedSet.indexOf(modelData.account) >= 0
                         readonly property bool isOnline: page.onlineFull !== "" && modelData.full.toLowerCase() === page.onlineFull
                         readonly property var cells: [modelData.note || "-",
                                                       backend.revealed ? modelData.account : Theme.mask,
@@ -201,9 +251,9 @@ SmoothScrollView {
                             id: rowArea
                             anchors.fill: parent
                             hoverEnabled: true
-                            onClicked: page.selected = rowItem.modelData.account
+                            onClicked: (mouse) => page.selectRow(rowItem.modelData.account, mouse.modifiers)
                             onDoubleClicked: {
-                                page.selected = rowItem.modelData.account
+                                page.selectOnly(rowItem.modelData.account)
                                 dialog.openFor(rowItem.modelData)
                             }
                         }
@@ -223,6 +273,19 @@ SmoothScrollView {
     }
 
     AccountDialog { id: dialog; objectName: "accountDialog" }
+    ExportDialog { id: exportDialog; objectName: "exportDialog" }
+    ImportDialog { id: importDialog; objectName: "importDialog" }
+
+    FileDialog {
+        id: importFile
+        title: "选择账号迁移文件"
+        nameFilters: ["账号迁移文件 (*.xyacc)", "所有文件 (*)"]
+        onAccepted: {
+            const text = backend.readTransferFile(selectedFile)
+            if (text)
+                importDialog.openWith(text)
+        }
+    }
 
     Dialog {
         id: confirm
@@ -234,15 +297,16 @@ SmoothScrollView {
         Label {
             width: parent.width
             wrapMode: Text.Wrap
-            text: page.selectedAcc ? "确定删除「" + page.title(page.selectedAcc) + "」？保存的密码也会一起删除。" : ""
+            text: page.selectedAcc ? "确定删除「" + page.title(page.selectedAcc) + "」？保存的密码也会一起删除。"
+                                   : "确定删除选中的 " + page.selectedSet.length + " 个账号？保存的密码也会一起删除。"
         }
         footer: DialogButtonBox {
             Button { text: "删除"; highlighted: true; DialogButtonBox.buttonRole: DialogButtonBox.AcceptRole }
             Button { text: "取消"; DialogButtonBox.buttonRole: DialogButtonBox.RejectRole }
         }
         onAccepted: {
-            backend.deleteAccount(page.selected)
-            page.selected = ""
+            backend.deleteAccounts(page.selectedSet)
+            page.selectOnly("")
         }
     }
 }

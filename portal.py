@@ -127,11 +127,17 @@ class RequestGate:
     def remaining(self) -> float:
         return max(0.0, self._next - time.monotonic())
 
+    def refund(self) -> None:
+        """刚发的请求被门户拒了、什么也没改（比如解绑 MAC 说“mac不存在”）：不占间隔，下一个请求马上可以发。"""
+        self._next = time.monotonic()
+
 
 _gates: dict[str, RequestGate] = {}
 _terminals: dict[str, tuple[float, str, str, str, str]] = {}   # host -> (时间, IP, MAC, VLAN, 在线账号)
 _configs: dict[str, tuple[float, "PortalConfig"]] = {}         # host -> (时间, 门户配置)
 _wait_listener = None
+# 解绑 MAC 时门户说“mac不存在”的（门户 -> MAC）：本机没绑 MAC，之后注销直接走普通注销，少一个请求
+_no_mac_binding: dict[str, str] = {}
 
 
 def gate_for(host: str) -> RequestGate:
@@ -161,6 +167,7 @@ def forget_terminal() -> None:
     """网络变了（换了 Wi-Fi、重新拿到 IP），下次登录前重新查本机 IP/MAC 和门户配置。"""
     _terminals.clear()
     _configs.clear()
+    _no_mac_binding.clear()
 
 
 def looks_rate_limited(d: dict) -> bool:
@@ -408,7 +415,7 @@ class Portal:
         """
         cfg = self.config()
         ip, mac, vlan, account = self._terminal()
-        if cfg.unbind_on_logout:
+        if cfg.unbind_on_logout and _no_mac_binding.get(self.host) != mac:
             if not account:
                 # 解绑要带在线账号；缓存里没有（或缓存时不在线）就重新查一次
                 st = self._fresh_status()
@@ -441,7 +448,11 @@ class Portal:
         ])
         if _ok(d):
             return True
-        log.info("解绑 MAC 失败（%s），改用普通注销", _str(d, "msg") or "门户没给原因")
+        msg = _str(d, "msg")
+        log.info("解绑 MAC 失败（%s），改用普通注销", msg or "门户没给原因")
+        self.gate.refund()   # 解绑没成功、什么也没改：紧接着注销不用再等间隔（网页也是连着发的）
+        if "不存在" in msg:
+            _no_mac_binding[self.host] = mac
         return False
 
     @staticmethod

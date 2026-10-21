@@ -18,8 +18,11 @@ from pathlib import Path
 from PySide6.QtCore import Property, QObject, Qt, QTimer, QUrl, Signal, Slot
 from PySide6.QtGui import QDesktopServices, QFontDatabase, QGuiApplication
 
+import segno
+
 import logfiles
 import portal as portal_module
+import transfer
 from portal import (CARRIERS, DEFAULT_HOST, DEFAULT_TERMINAL_TYPE, TERMINAL_TYPES, SELF_SERVICE_URL, LoginError, Portal, PortalError, Status, carrier_name,
                     format_fee, format_flow, format_limit, format_mac, format_minutes, format_seconds)
 from portal import log as portal_log
@@ -50,7 +53,8 @@ DEFAULT_FONTS = ["Segoe UI Variable Text", "Segoe UI", "Microsoft YaHei UI", "Mi
 OPTIONAL_FONTS = ["MiSans", "HarmonyOS Sans SC", "PingFang SC", "OPPO Sans", "Alibaba PuHuiTi 3.0"]
 
 # 隐私模式下要打码的原始字段：账号、实名、IP、MAC
-SENSITIVE_KEYS = {"uid", "AC", "NID", "v46ip", "v4ip", "lip", "ss5", "ss3", "olip", "olmac", "ss4", "myv6ip", "v6ip"}
+SENSITIVE_KEYS = {"uid", "AC", "NID", "v46ip", "v4ip", "lip", "ss5", "ss3", "olip", "olmac", "ss4", "myv6ip", "v6ip",
+                  "ss1", "opip"}   # 真门户还有 ss1（MAC）、opip（IP）
 # 账号信息（loadUserInfo）返回里属于个人身份的字段
 SECRET_INFO_KEYS = {"account", "user_name", "username", "real_name", "name", "mobile", "phone", "id_card", "email"}
 
@@ -713,7 +717,7 @@ class Backend(QObject):
                 return
             log_event("注销成功" if ok else "注销：门户回复本来就不在线")
             if ok:
-                self.toast.emit("success", "已注销", "", 3000)
+                self.toast.emit("offline", "已注销", "", 3000)
             else:
                 self.toast.emit("warning", "注销失败", "可能本来就没有登录", 3000)
             # 手动注销后不要马上又被自动重连登回去
@@ -998,6 +1002,113 @@ class Backend(QObject):
         self.store.remove(account)
         self.accountsChanged.emit()
         self.toast.emit("success", "已删除", name, 3000)
+
+    # ---- 账号迁移（和手机互相导入导出，格式见 transfer.py） ----
+
+    @Slot(result=str)
+    def newTransferCode(self) -> str:
+        return transfer.random_code()
+
+    @Slot("QVariantList", str, result=str)
+    def exportAccounts(self, accounts, code: str) -> str:
+        """把选中的账号（含保存的密码）加密成迁移数据；失败时弹提示、返回空串。"""
+        chosen = [a for a in self.store.accounts if a.account in set(accounts)]
+        if not chosen:
+            self.toast.emit("warning", "请至少选一个账号", "", 3000)
+            return ""
+        try:
+            return transfer.encode(chosen, code.strip())
+        except transfer.TransferError as e:
+            self.toast.emit("warning", "无法导出", str(e), 4000)
+            return ""
+
+    @Slot(str, result="QVariantList")
+    def qrMatrix(self, data: str) -> list:
+        """迁移数据的二维码，每行一个 "0101…" 字符串（1 为黑），含 4 格白边；放不下时返回空列表。"""
+        try:
+            qr = segno.make(data, error="m", micro=False)
+        except segno.DataOverflowError:
+            self.toast.emit("warning", "账号太多，二维码放不下", "少选几个分批导出，或保存成文件", 5000)
+            return []
+        return ["".join("1" if v else "0" for v in row) for row in qr.matrix_iter(scale=1, border=4)]
+
+    @Slot(str, "QVariant", result=bool)
+    def saveTransferFile(self, data: str, target) -> bool:
+        path = Path(target.toLocalFile() if isinstance(target, QUrl) else QUrl(str(target)).toLocalFile() or str(target))
+        try:
+            path.write_text(data + "\n", encoding="utf-8")
+        except OSError as e:
+            self.toast.emit("error", "保存失败", str(e), 6000)
+            return False
+        self.toast.emit("success", "已保存", path.name, 3000)
+        return True
+
+    @Slot("QVariant", result=str)
+    def readTransferFile(self, target) -> str:
+        path = Path(target.toLocalFile() if isinstance(target, QUrl) else QUrl(str(target)).toLocalFile() or str(target))
+        try:
+            text = path.read_text(encoding="utf-8", errors="replace")
+        except OSError as e:
+            self.toast.emit("error", "读取失败", str(e), 6000)
+            return ""
+        if not transfer.looks_like(text):
+            self.toast.emit("warning", "不是账号迁移文件", path.name, 4000)
+            return ""
+        return text
+
+    @Slot(result=str)
+    def clipboardTransfer(self) -> str:
+        """剪贴板里是手机“分享”出来的迁移数据就返回它，否则返回空串。"""
+        text = QGuiApplication.clipboard().text()
+        return text if transfer.looks_like(text) else ""
+
+    @Slot(str, str, result="QVariantList")
+    def previewImport(self, text: str, code: str) -> list:
+        """用导入码解开迁移数据，返回账号列表给界面勾选；导入码不对时弹提示、返回空列表。"""
+        try:
+            self._pending_import = transfer.decode(text, code.strip())
+        except transfer.TransferError as e:
+            self.toast.emit("warning", "无法导入", str(e), 4000)
+            return []
+        return [{"account": a.account, "label": self.account_title(a), "carrier": a.carrier,
+                 "hasPassword": bool(a.password), "exists": self.store.get(a.account) is not None}
+                for a in self._pending_import]
+
+    @Slot("QVariantList", result=int)
+    def applyImport(self, accounts) -> int:
+        """导入勾选的账号：已有的更新运营商、备注、终端类型和密码（导入的没带密码时保留原来的）。"""
+        chosen = set(accounts)
+        n = 0
+        for a in getattr(self, "_pending_import", []):
+            if a.account not in chosen:
+                continue
+            old = self.store.get(a.account)
+            if old:
+                a.last_used = old.last_used
+                if not a.password:
+                    a.password = old.password
+                if not a.note:
+                    a.note = old.note
+            self.store.upsert(a)
+            n += 1
+        self._pending_import = []
+        if n:
+            self.accountsChanged.emit()
+            self.toast.emit("success", f"已导入 {n} 个账号", "", 3000)
+        return n
+
+    @Slot("QVariantList")
+    def deleteAccounts(self, accounts) -> None:
+        """删除多个账号（账号管理里 Ctrl/Shift 多选后删除），只弹一次提示。"""
+        accs = [a for a in (self.store.get(x) for x in accounts) if a]
+        if len(accs) == 1:
+            self.deleteAccount(accs[0].account)
+            return
+        for a in accs:
+            self.store.remove(a.account)
+        if accs:
+            self.accountsChanged.emit()
+            self.toast.emit("success", f"已删除 {len(accs)} 个账号", "", 3000)
 
     def account_title(self, acc: Account) -> str:
         """提示里怎么称呼一个账号：有备注只显示备注；没备注时，隐藏状态下打码。"""

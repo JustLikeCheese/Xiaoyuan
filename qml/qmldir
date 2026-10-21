@@ -11,6 +11,8 @@ NavButton 1.0 NavButton.qml
 SmoothScrollView 1.0 SmoothScrollView.qml
 ToastHost 1.0 ToastHost.qml
 AccountDialog 1.0 AccountDialog.qml
+ExportDialog 1.0 ExportDialog.qml
+ImportDialog 1.0 ImportDialog.qml
 HomePage 1.0 HomePage.qml
 AccountsPage 1.0 AccountsPage.qml
 ReconnectPage 1.0 ReconnectPage.qml
